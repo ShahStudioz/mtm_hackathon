@@ -35,4 +35,11 @@ return [
         ],
     ],
 
+    'llm' => [
+        'base_url' => env('LLM_BASE_URL', 'https://api.x.ai/v1'),
+        'api_key' => env('LLM_API_KEY', ''),
+        'model' => env('LLM_MODEL', 'grok-2-latest'),
+        'timeout' => (int) env('LLM_TIMEOUT', 30),
+    ],
+
 ];
