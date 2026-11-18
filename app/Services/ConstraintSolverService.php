@@ -605,7 +605,24 @@ class ConstraintSolverService
             return true;
         }));
 
-        if (empty($validVenues) && empty($requiredFeatures) && empty($forbiddenFeatures)) {
+        // Fallback: If no venue matches all required features, match capacity without forbidden venues
+        if (empty($validVenues)) {
+            $validVenues = array_values(array_filter($facts['venue_options'] ?? [], function ($v) use ($totalHeadcount, $forbiddenFeatures) {
+                if ((int) ($v['capacity'] ?? 0) < $totalHeadcount) {
+                    return false;
+                }
+                foreach ($forbiddenFeatures as $forb) {
+                    if ($this->venueHasFeature($v, $forb)) {
+                        return false;
+                    }
+                }
+
+                return true;
+            }));
+        }
+
+        // Final fallback: any venue meeting headcount capacity
+        if (empty($validVenues)) {
             $validVenues = array_values(array_filter($facts['venue_options'] ?? [], function ($v) use ($totalHeadcount) {
                 return (int) ($v['capacity'] ?? 0) >= $totalHeadcount;
             }));
@@ -688,32 +705,39 @@ class ConstraintSolverService
             return false;
         }
 
-        $featureTokens = array_filter(preg_split('/[\s_\-]+/', $feature));
+        $nameLower = strtolower(trim((string) ($venue['name'] ?? '')));
 
-        // Check venue features list
+        // 1. Direct venue name match (e.g. feature is "hall 3", "hall b", or "Hall 3 is under maintenance")
+        if ($nameLower !== '') {
+            if ($nameLower === $feature || str_contains($feature, $nameLower)) {
+                return true;
+            }
+            if (preg_match('/\b'.preg_quote($feature, '/').'\b/i', $nameLower)) {
+                return true;
+            }
+        }
+
+        // 2. Check venue features list (e.g. "standby generator", "ramp access", "wheelchair", "projector")
         $features = $venue['features'] ?? [];
         if (is_array($features)) {
             foreach ($features as $f) {
                 $fLower = strtolower(trim((string) $f));
-                if (str_contains($fLower, $feature)) {
+                if ($fLower === '') {
+                    continue;
+                }
+                if ($fLower === $feature || str_contains($fLower, $feature) || str_contains($feature, $fLower)) {
                     return true;
                 }
+
+                // Check meaningful tokens (excluding common venue words like 'hall', 'room', etc.)
+                $featureTokens = array_filter(preg_split('/[\s_\-]+/', $feature));
                 foreach ($featureTokens as $token) {
-                    if (strlen($token) >= 4 && str_contains($fLower, $token)) {
-                        return true;
+                    if (strlen($token) >= 4 && ! in_array($token, ['hall', 'room', 'floor', 'building', 'space', 'zone', 'only', 'have', 'with'], true)) {
+                        if (str_contains($fLower, $token)) {
+                            return true;
+                        }
                     }
                 }
-            }
-        }
-
-        // Check venue name
-        $nameLower = strtolower(trim((string) ($venue['name'] ?? '')));
-        if (str_contains($nameLower, $feature)) {
-            return true;
-        }
-        foreach ($featureTokens as $token) {
-            if (strlen($token) >= 4 && str_contains($nameLower, $token)) {
-                return true;
             }
         }
 

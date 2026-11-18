@@ -158,11 +158,27 @@ class AreaPlannerService
     {
         $budgetLimit = (float) ($facts['event']['total_budget_limit'] ?? 0);
         $venueCost = (float) ($computed['venue_cost'] ?? 0);
+        if ($venueCost <= 0 && ! empty($state->venue_plan['cost'])) {
+            $venueCost = (float) $state->venue_plan['cost'];
+        }
         $foodCost = (float) ($computed['catering_cost'] ?? 0);
+        if ($foodCost <= 0 && ! empty($state->food_plan['total_food_cost'])) {
+            $foodCost = (float) $state->food_plan['total_food_cost'];
+        }
         $judgingCost = (float) ($computed['judging_cost'] ?? 0);
+        if ($judgingCost <= 0 && ! empty($state->judging_plan['total_judging_cost'])) {
+            $judgingCost = (float) $state->judging_plan['total_judging_cost'];
+        }
         $fixedExpenses = $facts['fixed_expenses'] ?? [];
-        $totalSpent = (float) ($computed['total_cost'] ?? 0);
-        $remainingBalance = (float) ($computed['remaining_budget'] ?? 0);
+        $fixedExpensesTotal = 0.0;
+        foreach ($fixedExpenses as $fe) {
+            if (($fe['is_approved'] ?? true) === true) {
+                $fixedExpensesTotal += (float) ($fe['cost'] ?? 0);
+            }
+        }
+
+        $totalSpent = $venueCost + $foodCost + $judgingCost + $fixedExpensesTotal;
+        $remainingBalance = $budgetLimit - $totalSpent;
         $withinBudget = $totalSpent <= $budgetLimit;
 
         $rejectedMessages = $state->ingestedMessages()->where('status', 'rejected')->get();
@@ -188,6 +204,36 @@ class AreaPlannerService
         );
 
         $payload = $result['data'] ?? (is_array($result['content']) ? $result['content'] : ['raw' => $result['raw_content']]);
+
+        // Guard: Ensure line_items has correct venue cost matching venue plan
+        if (isset($payload['line_items']) && is_array($payload['line_items'])) {
+            $hasVenue = false;
+            foreach ($payload['line_items'] as &$item) {
+                if (strtolower((string) ($item['category'] ?? '')) === 'venue') {
+                    $hasVenue = true;
+                    if ((empty($item['amount']) || (float) $item['amount'] === 0.0) && $venueCost > 0) {
+                        $item['amount'] = $venueCost;
+                    }
+                }
+            }
+            unset($item);
+
+            if (! $hasVenue && $venueCost > 0) {
+                array_unshift($payload['line_items'], [
+                    'category' => 'Venue',
+                    'description' => 'Venue cost',
+                    'amount' => $venueCost,
+                ]);
+            }
+
+            $recalcSpend = array_reduce($payload['line_items'], fn ($sum, $li) => $sum + (float) ($li['amount'] ?? 0), 0.0);
+            if ($recalcSpend > 0) {
+                $payload['total_spent'] = $recalcSpend;
+                $payload['remaining_balance'] = $budgetLimit - $recalcSpend;
+                $payload['within_budget'] = $recalcSpend <= $budgetLimit;
+            }
+        }
+
         $state->update(['budget_plan' => $payload]);
     }
 }

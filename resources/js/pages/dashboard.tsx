@@ -153,10 +153,8 @@ export default function Dashboard({
     const judging = planState?.judging_plan || {};
     const budget = planState?.budget_plan || {};
 
-    const budgetLimit = budget.budget_limit ?? facts.event?.total_budget_limit ?? computed.total_budget_limit ?? 650000;
-    const totalSpend = budget.total_spent ?? computed.total_cost ?? budget.total_allocated ?? 0;
-    const surplus = budget.remaining_balance ?? computed.remaining_budget ?? (budgetLimit - totalSpend);
-    const spendPercentage = budgetLimit > 0 ? Math.min(100, Math.round((totalSpend / budgetLimit) * 100)) : 0;
+    const venueCost = Number(venue.cost ?? computed.venue_cost ?? 0);
+    const budgetLimit = Number(budget.budget_limit ?? facts.event?.total_budget_limit ?? computed.total_budget_limit ?? 650000);
 
     // Food fields
     const catererName = food.selected_package || food.selected_caterer || computed.selected_catering?.name || 'Standard Catering Package';
@@ -175,15 +173,36 @@ export default function Dashboard({
     const honorarium = judging.honorarium_per_judge ?? facts.judging_rules?.honorarium_per_judge ?? 0;
     const totalJudgingCost = judging.total_judging_cost ?? computed.judging_cost ?? (assignedJudges * honorarium);
 
-    // Budget ledger line items
-    const lineItems = Array.isArray(budget.line_items) && budget.line_items.length > 0
+    // Budget ledger line items with fallback for missing or 0 venue cost
+    const rawLineItems = Array.isArray(budget.line_items) && budget.line_items.length > 0
         ? budget.line_items
         : [
-            ...(computed.venue_cost ? [{ category: 'Venue', description: 'Selected venue rental', amount: computed.venue_cost }] : []),
+            ...(venueCost ? [{ category: 'Venue', description: 'Selected venue rental', amount: venueCost }] : []),
             ...(computed.catering_cost ? [{ category: 'Food', description: 'Catering & refreshments', amount: computed.catering_cost }] : []),
             ...(computed.judging_cost ? [{ category: 'Judging', description: 'Judge honorariums', amount: computed.judging_cost }] : []),
             ...((facts.fixed_expenses || []).map((exp: any) => ({ category: 'Fixed', description: exp.item, amount: exp.cost }))),
         ];
+
+    let foundVenue = false;
+    const lineItems = rawLineItems.map((item: any) => {
+        const isVenue = String(item.category || '').toLowerCase() === 'venue' || String(item.description || '').toLowerCase().includes('venue');
+        if (isVenue) {
+            foundVenue = true;
+            if ((!item.amount || Number(item.amount) === 0) && venueCost > 0) {
+                return { ...item, amount: venueCost };
+            }
+        }
+        return item;
+    });
+
+    if (!foundVenue && venueCost > 0) {
+        lineItems.unshift({ category: 'Venue', description: 'Venue cost', amount: venueCost });
+    }
+
+    const calculatedLineItemTotal = lineItems.reduce((acc: number, item: any) => acc + Number(item.amount || item.cost || 0), 0);
+    const totalSpend = calculatedLineItemTotal > 0 ? calculatedLineItemTotal : Number(budget.total_spent ?? computed.total_cost ?? 0);
+    const surplus = budgetLimit - totalSpend;
+    const spendPercentage = budgetLimit > 0 ? Math.min(100, Math.round((totalSpend / budgetLimit) * 100)) : 0;
     const excludedItems = budget.excluded_items || [];
 
     return (
