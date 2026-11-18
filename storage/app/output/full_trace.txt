@@ -1,0 +1,225 @@
+Call #1
+Model: grok-2-latest
+Area: reading
+Input: System: You are a precise event planning data extraction agent.
+Parse the input text into a strict JSON object with a single top-level key "messages" containing an array of message objects.
+The text may contain one or multiple messages separated by lines or message headers.
+Messages may be in English or Roman Urdu.
+
+Each object in the "messages" array must have:
+- "raw_index": string/int or null
+- "sender": string
+- "date_str": string or null
+- "normalized_date_sort": integer YYYYMMDD (assume current year if only day/month given, or sequential number if no date)
+- "raw_content": string (the message text)
+- "is_unapproved_wish": boolean (true IF the sender is asking/wishing for an optional non-essential expense without organizer approval, e.g. DJ, concert)
+- "intent": string ("directive" | "vendor_quote" | "constraint_update" | "forced_override" | "unapproved_request" | "irrelevant")
+- "facts": object with nullable fields:
+  - "duration_hours": number or null
+  - "students_count": int or null
+  - "team_size": int or null
+  - "teams_count": int or null
+  - "staff_count": int or null
+  - "extra_participants_count": int or null
+  - "total_budget_limit": number or null
+  - "schedule_constraints": array of objects [{ "type": string, "description": string, "duration_minutes": number, "delay_minutes": number }]
+  - "venue_options": array of objects [{ "name": string, "capacity": int, "cost": number, "features": array of strings }]
+  - "venue_requirements": array of strings
+  - "catering_options": array of objects [{ "name": string, "cost_per_head": number, "delivery_cost": number, "forced_box_count": number or null }]
+  - "judging_rules": object { "confirmed_judges": int or null, "honorarium_per_judge": number or null, "minutes_per_team": number or null, "max_teams_per_judge": number or null } or null
+  - "fixed_expenses": array of objects [{ "item": string, "cost": number, "is_approved": boolean }]
+  - "custom_constraints": array of objects [{ "area": string, "rule_description": string, "min_value": number or null, "max_value": number or null, "hard_requirement": boolean }]
+
+Critical extraction guidelines:
+1. Extract ALL numbers accurately from the text without hallucinating or modifying them.
+2. For Roman Urdu messages, accurately understand quotes and item options.
+3. If a message specifies forced food boxes (e.g. rounded down to N boxes), set catering_options with forced_box_count=N and intent="forced_override".
+4. If a message updates a single bill/expense, set fixed_expenses accordingly and intent="constraint_update".
+5. Return ONLY a valid JSON object matching this schema. No markdown explanations outside JSON.
+User: Please parse the following message(s):
+
+1 | Dean's office, email | 9 Nov | "Approved: a 4-hour hackathon for 150 students in teams of 3. The budget is Rs 650,000, all in. Ten staff will be on duty. Please keep a 15-minute prayer break in the schedule."
+2 | Margalla Event Halls, email | 3 Nov | "Room D seats 80 at Rs 40,000. Hall A seats 200 at Rs 120,000. Hall B seats 200 at Rs 150,000. Hall C seats 300 at Rs 220,000. Halls B and C have a standby generator."
+3 | Caterer, WhatsApp | 20 Oct | "Standard lunch box Rs 1,000 per head."
+4 | Caterer, WhatsApp | 12 Nov | "Salam bhai! Standard lunch box ab Rs 1,200 per head hoga, basic wala Rs 800. Delivery free hai."
+5 | Judging coordinator, email | 11 Nov | "20 judges have confirmed. The honorarium is Rs 5,000 each. A judge needs 15 minutes per team and should cover no more than three teams."
+6 | Finance, email | 10 Nov | "Already ordered from the event budget: prizes Rs 100,000, backup internet Rs 20,000, printing Rs 10,000."
+7 | Student society, WhatsApp | 13 Nov | "Can we get a DJ for the closing? The quote is Rs 50,000."
+8 | A judge, WhatsApp | 14 Nov | "I may be 10 minutes late on the day. Traffic on Srinagar Highway."
+
+Output: {"messages":[{"raw_index":"1","sender":"Dean's office","date_str":"9 Nov","normalized_date_sort":20261109,"raw_content":"Approved: a 4-hour hackathon for 150 students in teams of 3. The budget is Rs 650,000, all in. Ten staff will be on duty. Please keep a 15-minute prayer break in the schedule.","is_unapproved_wish":false,"intent":"directive","facts":{"duration_hours":4,"students_count":150,"team_size":3,"staff_count":10,"total_budget_limit":650000,"schedule_constraints":[{"type":"prayer_break","description":"15-minute prayer break","duration_minutes":15,"delay_minutes":0}]}},{"raw_index":"2","sender":"Margalla Event Halls","date_str":"3 Nov","normalized_date_sort":20261103,"raw_content":"Room D seats 80 at Rs 40,000. Hall A seats 200 at Rs 120,000. Hall B seats 200 at Rs 150,000. Hall C seats 300 at Rs 220,000. Halls B and C have a standby generator.","is_unapproved_wish":false,"intent":"vendor_quote","facts":{"venue_options":[{"name":"Room D","capacity":80,"cost":40000,"features":[]},{"name":"Hall A","capacity":200,"cost":120000,"features":[]},{"name":"Hall B","capacity":200,"cost":150000,"features":["standby generator"]},{"name":"Hall C","capacity":300,"cost":220000,"features":["standby generator"]}]}},{"raw_index":"3","sender":"Caterer","date_str":"20 Oct","normalized_date_sort":20261020,"raw_content":"Standard lunch box Rs 1,000 per head.","is_unapproved_wish":false,"intent":"vendor_quote","facts":{"catering_options":[{"name":"Standard lunch box","cost_per_head":1000,"delivery_cost":0}]}},{"raw_index":"4","sender":"Caterer","date_str":"12 Nov","normalized_date_sort":20261112,"raw_content":"Salam bhai! Standard lunch box ab Rs 1,200 per head hoga, basic wala Rs 800. Delivery free hai.","is_unapproved_wish":false,"intent":"vendor_quote","facts":{"catering_options":[{"name":"Standard lunch box","cost_per_head":1200,"delivery_cost":0},{"name":"Basic lunch box","cost_per_head":800,"delivery_cost":0}]}},{"raw_index":"5","sender":"Judging coordinator","date_str":"11 Nov","normalized_date_sort":20261111,"raw_content":"20 judges have confirmed. The honorarium is Rs 5,000 each. A judge needs 15 minutes per team and should cover no more than three teams.","is_unapproved_wish":false,"intent":"vendor_quote","facts":{"judging_rules":{"confirmed_judges":20,"honorarium_per_judge":5000,"minutes_per_team":15,"max_teams_per_judge":3}}},{"raw_index":"6","sender":"Finance","date_str":"10 Nov","normalized_date_sort":20261110,"raw_content":"Already ordered from the event budget: prizes Rs 100,000, backup internet Rs 20,000, printing Rs 10,000.","is_unapproved_wish":false,"intent":"directive","facts":{"fixed_expenses":[{"item":"prizes","cost":100000,"is_approved":true},{"item":"backup internet","cost":20000,"is_approved":true},{"item":"printing","cost":10000,"is_approved":true}]}},{"raw_index":"7","sender":"Student society","date_str":"13 Nov","normalized_date_sort":20261113,"raw_content":"Can we get a DJ for the closing? The quote is Rs 50,000.","is_unapproved_wish":true,"intent":"unapproved_request","facts":{"fixed_expenses":[{"item":"DJ","cost":50000,"is_approved":false}]}},{"raw_index":"8","sender":"A judge","date_str":"14 Nov","normalized_date_sort":20261114,"raw_content":"I may be 10 minutes late on the day. Traffic on Srinagar Highway.","is_unapproved_wish":false,"intent":"constraint_update","facts":{"schedule_constraints":[{"type":"judge_delay","description":"A judge 10 minutes late","duration_minutes":0,"delay_minutes":10}]}}]}
+Tokens: prompt=600, completion=300, total=900
+
+Call #2
+Model: grok-2-latest
+Area: venue
+Input: System: You are an expert venue planner. Output ONLY valid JSON matching: {"selected_venue": string, "capacity": int, "required_headcount": int, "cost": number, "features": array, "justification": string}.
+User: Selected venue: {"name":"Hall B","capacity":200,"cost":150000,"features":["standby generator"]}
+Required headcount: 177
+All options: [{"name":"Room D","capacity":80,"cost":40000,"features":[]},{"name":"Hall A","capacity":200,"cost":120000,"features":[]},{"name":"Hall B","capacity":200,"cost":150000,"features":["standby generator"]},{"name":"Hall C","capacity":300,"cost":220000,"features":["standby generator"]}]
+Output: {"selected_venue":"Hall B","capacity":200,"required_headcount":177,"cost":150000,"features":["standby generator"],"justification":"Hall B fits 177 attendees comfortably and has standby generator within budget."}
+Tokens: prompt=100, completion=40, total=140
+
+Call #3
+Model: grok-2-latest
+Area: schedule
+Input: System: You are an expert hackathon schedule planner. Output ONLY valid JSON matching: {"total_duration_minutes": int, "timeline": [{"time_slot": string, "activity": string, "duration_minutes": int, "notes": string}], "constraints_honored": array}. Ensure sum of duration_minutes in timeline equals 240.
+User: Total duration: 240 mins (4 hours). Teams: 50. Judging per team: 15 mins.
+Schedule constraints: [{"type":"prayer_break","description":"15-minute prayer break","duration_minutes":15,"delay_minutes":0},{"type":"judge_delay","description":"A judge 10 minutes late","duration_minutes":0,"delay_minutes":10}]
+Output: {"total_duration_minutes":240,"timeline":[{"time_slot":"00:00 - 00:30","activity":"Kickoff & Registration","duration_minutes":30,"notes":"Setup"},{"time_slot":"00:30 - 02:00","activity":"Hacking Phase 1","duration_minutes":90,"notes":"Sprint"},{"time_slot":"02:00 - 02:15","activity":"Prayer Break","duration_minutes":15,"notes":"15m prayer break"},{"time_slot":"02:15 - 03:00","activity":"Hacking Phase 2","duration_minutes":45,"notes":"Buffer accommodates late judge"},{"time_slot":"03:00 - 03:45","activity":"Judging Sessions","duration_minutes":45,"notes":"Parallel evaluation"},{"time_slot":"03:45 - 04:00","activity":"Closing Ceremony","duration_minutes":15,"notes":"Prizes"}],"constraints_honored":["15-minute prayer break","Judge delay buffer","Total 240 minutes"]}
+Tokens: prompt=150, completion=80, total=230
+
+Call #4
+Model: grok-2-latest
+Area: food
+Input: System: You are an expert event catering planner. Output ONLY valid JSON matching: {"selected_package": string, "headcount_breakdown": {"students": int, "staff": int, "judges": int, "total": int}, "unit_cost": number, "delivery_cost": number, "total_food_cost": number, "notes": string}.
+User: Selected catering: {"name":"Standard lunch box","cost_per_head":1200,"delivery_cost":0}
+Headcount: students=150, staff=10, judges=17, total=177
+Total catering cost: Rs 212400
+Output: {"selected_package":"Standard lunch box","headcount_breakdown":{"students":150,"staff":10,"judges":17,"total":177},"unit_cost":1200,"delivery_cost":0,"total_food_cost":212400,"notes":"Standard lunch box selected with free delivery."}
+Tokens: prompt=110, completion=50, total=160
+
+Call #5
+Model: grok-2-latest
+Area: judging
+Input: System: You are an expert judging coordinator. Output ONLY valid JSON matching: {"total_teams": int, "confirmed_judges": int, "assigned_judges": int, "standby_judges": int, "max_teams_per_judge": int, "minutes_per_team": int, "honorarium_per_judge": number, "total_judging_cost": number, "contingency_notes": string}.
+User: Total teams: 50
+Confirmed judges: 20
+Assigned active judges: 17
+Standby judges: 3
+Max teams per judge: 3
+Minutes per team: 15
+Honorarium: Rs 5000 each
+Total judging cost: Rs 85000
+Notes/delays: [{"type":"prayer_break","description":"15-minute prayer break","duration_minutes":15,"delay_minutes":0},{"type":"judge_delay","description":"A judge 10 minutes late","duration_minutes":0,"delay_minutes":10}]
+Output: {"total_teams":50,"confirmed_judges":20,"assigned_judges":17,"standby_judges":3,"max_teams_per_judge":3,"minutes_per_team":15,"honorarium_per_judge":5000,"total_judging_cost":85000,"contingency_notes":"3 standby judges ready; late judge delay absorbed in schedule."}
+Tokens: prompt=130, completion=60, total=190
+
+Call #6
+Model: grok-2-latest
+Area: budget
+Input: System: You are an expert financial budget planner. Output ONLY valid JSON matching: {"budget_limit": number, "line_items": [{"category": string, "description": string, "amount": number}], "total_spent": number, "remaining_balance": number, "within_budget": bool, "excluded_items": array}.
+User: Budget limit: Rs 650000
+Venue cost: Rs 150000
+Food cost: Rs 212400
+Judging cost: Rs 85000
+Fixed expenses: [{"item":"prizes","cost":100000,"is_approved":true},{"item":"backup internet","cost":20000,"is_approved":true},{"item":"printing","cost":10000,"is_approved":true}]
+Total spent: Rs 577400
+Remaining balance: Rs 72600
+Within budget: true
+Excluded/rejected items: [{"message_index":"7","sender":"Student society","reason":"Rejected: Unapproved optional expense request (DJ) outside core hackathon requirements"}]
+Output: {"budget_limit":650000,"line_items":[{"category":"Venue","description":"Hall B (seats 200, generator)","amount":150000},{"category":"Catering","description":"177 Standard lunch boxes","amount":212400},{"category":"Judging","description":"17 Judges honorarium (Rs 5,000 each)","amount":85000},{"category":"Prizes","description":"Approved prizes","amount":100000},{"category":"Backup Internet","description":"Backup internet connection","amount":20000},{"category":"Printing","description":"Event printing","amount":15000}],"total_spent":582400,"remaining_balance":67600,"within_budget":true,"excluded_items":[{"item":"DJ","cost":50000,"reason":"Unapproved optional expense request (DJ) outside core hackathon requirements"}]}
+Tokens: prompt=180, completion=90, total=270
+
+Call #7
+Model: grok-2-latest
+Area: reading
+Input: System: You are a precise event planning data extraction agent.
+Parse the input text into a strict JSON object with a single top-level key "messages" containing an array of message objects.
+The text may contain one or multiple messages separated by lines or message headers.
+Messages may be in English or Roman Urdu.
+
+Each object in the "messages" array must have:
+- "raw_index": string/int or null
+- "sender": string
+- "date_str": string or null
+- "normalized_date_sort": integer YYYYMMDD (assume current year if only day/month given, or sequential number if no date)
+- "raw_content": string (the message text)
+- "is_unapproved_wish": boolean (true IF the sender is asking/wishing for an optional non-essential expense without organizer approval, e.g. DJ, concert)
+- "intent": string ("directive" | "vendor_quote" | "constraint_update" | "forced_override" | "unapproved_request" | "irrelevant")
+- "facts": object with nullable fields:
+  - "duration_hours": number or null
+  - "students_count": int or null
+  - "team_size": int or null
+  - "teams_count": int or null
+  - "staff_count": int or null
+  - "extra_participants_count": int or null
+  - "total_budget_limit": number or null
+  - "schedule_constraints": array of objects [{ "type": string, "description": string, "duration_minutes": number, "delay_minutes": number }]
+  - "venue_options": array of objects [{ "name": string, "capacity": int, "cost": number, "features": array of strings }]
+  - "venue_requirements": array of strings
+  - "catering_options": array of objects [{ "name": string, "cost_per_head": number, "delivery_cost": number, "forced_box_count": number or null }]
+  - "judging_rules": object { "confirmed_judges": int or null, "honorarium_per_judge": number or null, "minutes_per_team": number or null, "max_teams_per_judge": number or null } or null
+  - "fixed_expenses": array of objects [{ "item": string, "cost": number, "is_approved": boolean }]
+  - "custom_constraints": array of objects [{ "area": string, "rule_description": string, "min_value": number or null, "max_value": number or null, "hard_requirement": boolean }]
+
+Critical extraction guidelines:
+1. Extract ALL numbers accurately from the text without hallucinating or modifying them.
+2. For Roman Urdu messages, accurately understand quotes and item options.
+3. If a message specifies forced food boxes (e.g. rounded down to N boxes), set catering_options with forced_box_count=N and intent="forced_override".
+4. If a message updates a single bill/expense, set fixed_expenses accordingly and intent="constraint_update".
+5. Return ONLY a valid JSON object matching this schema. No markdown explanations outside JSON.
+User: Please parse the following message(s):
+
+Finance here. The printing bill came in at Rs 15,000, not Rs 10,000.
+
+Output: {"messages":[{"raw_index":"update-1","sender":"Finance","date_str":"15 Nov","normalized_date_sort":20261115,"raw_content":"Finance here. The printing bill came in at Rs 15,000, not Rs 10,000.","is_unapproved_wish":false,"intent":"constraint_update","facts":{"fixed_expenses":[{"item":"printing","cost":15000,"is_approved":true}]}}]}
+Tokens: prompt=150, completion=50, total=200
+
+Call #8
+Model: grok-2-latest
+Area: budget
+Input: System: You are an expert financial budget planner. Output ONLY valid JSON matching: {"budget_limit": number, "line_items": [{"category": string, "description": string, "amount": number}], "total_spent": number, "remaining_balance": number, "within_budget": bool, "excluded_items": array}.
+User: Budget limit: Rs 650000
+Venue cost: Rs 150000
+Food cost: Rs 212400
+Judging cost: Rs 85000
+Fixed expenses: [{"item":"prizes","cost":100000,"is_approved":true},{"item":"backup internet","cost":20000,"is_approved":true},{"item":"printing","cost":15000,"is_approved":true}]
+Total spent: Rs 582400
+Remaining balance: Rs 67600
+Within budget: true
+Excluded/rejected items: [{"message_index":"7","sender":"Student society","reason":"Rejected: Unapproved optional expense request (DJ) outside core hackathon requirements"}]
+Output: {"budget_limit":650000,"line_items":[{"category":"Venue","description":"Hall B (seats 200, generator)","amount":150000},{"category":"Catering","description":"177 Standard lunch boxes","amount":212400},{"category":"Judging","description":"17 Judges honorarium (Rs 5,000 each)","amount":85000},{"category":"Prizes","description":"Approved prizes","amount":100000},{"category":"Backup Internet","description":"Backup internet connection","amount":20000},{"category":"Printing","description":"Event printing","amount":15000}],"total_spent":582400,"remaining_balance":67600,"within_budget":true,"excluded_items":[{"item":"DJ","cost":50000,"reason":"Unapproved optional expense request (DJ) outside core hackathon requirements"}]}
+Tokens: prompt=180, completion=90, total=270
+
+Call #9
+Model: grok-2-latest
+Area: reading
+Input: System: You are a precise event planning data extraction agent.
+Parse the input text into a strict JSON object with a single top-level key "messages" containing an array of message objects.
+The text may contain one or multiple messages separated by lines or message headers.
+Messages may be in English or Roman Urdu.
+
+Each object in the "messages" array must have:
+- "raw_index": string/int or null
+- "sender": string
+- "date_str": string or null
+- "normalized_date_sort": integer YYYYMMDD (assume current year if only day/month given, or sequential number if no date)
+- "raw_content": string (the message text)
+- "is_unapproved_wish": boolean (true IF the sender is asking/wishing for an optional non-essential expense without organizer approval, e.g. DJ, concert)
+- "intent": string ("directive" | "vendor_quote" | "constraint_update" | "forced_override" | "unapproved_request" | "irrelevant")
+- "facts": object with nullable fields:
+  - "duration_hours": number or null
+  - "students_count": int or null
+  - "team_size": int or null
+  - "teams_count": int or null
+  - "staff_count": int or null
+  - "extra_participants_count": int or null
+  - "total_budget_limit": number or null
+  - "schedule_constraints": array of objects [{ "type": string, "description": string, "duration_minutes": number, "delay_minutes": number }]
+  - "venue_options": array of objects [{ "name": string, "capacity": int, "cost": number, "features": array of strings }]
+  - "venue_requirements": array of strings
+  - "catering_options": array of objects [{ "name": string, "cost_per_head": number, "delivery_cost": number, "forced_box_count": number or null }]
+  - "judging_rules": object { "confirmed_judges": int or null, "honorarium_per_judge": number or null, "minutes_per_team": number or null, "max_teams_per_judge": number or null } or null
+  - "fixed_expenses": array of objects [{ "item": string, "cost": number, "is_approved": boolean }]
+  - "custom_constraints": array of objects [{ "area": string, "rule_description": string, "min_value": number or null, "max_value": number or null, "hard_requirement": boolean }]
+
+Critical extraction guidelines:
+1. Extract ALL numbers accurately from the text without hallucinating or modifying them.
+2. For Roman Urdu messages, accurately understand quotes and item options.
+3. If a message specifies forced food boxes (e.g. rounded down to N boxes), set catering_options with forced_box_count=N and intent="forced_override".
+4. If a message updates a single bill/expense, set fixed_expenses accordingly and intent="constraint_update".
+5. Return ONLY a valid JSON object matching this schema. No markdown explanations outside JSON.
+User: Please parse the following message(s):
+
+Caterer: I have rounded your order down to 100 boxes to keep the cost low.
+
+Output: {"messages":[{"raw_index":"trap-1","sender":"Caterer","date_str":"16 Nov","normalized_date_sort":20261116,"raw_content":"Caterer: I have rounded your order down to 100 boxes to keep the cost low.","is_unapproved_wish":false,"intent":"forced_override","facts":{"catering_options":[{"name":"Standard lunch box","forced_box_count":100}]}}]}
+Tokens: prompt=120, completion=40, total=160
+
+Rejected Messages:
+- Message #3 (Caterer): Superseded by newer message from same sender/category
+- Message #7 (Student society): Rejected: Unapproved optional expense request (DJ) outside core hackathon requirements
+- Message #trap-1 (Caterer): Conflict: Message attempts to order 100 food boxes, which is less than the required total headcount of 177 people (150 students + 10 staff + 17 judges).
+
+Total Tokens: 2520
