@@ -4,7 +4,7 @@
 !samples/
 !samples/**
 !output/
-!output/**
+!output/.gitkeep
 !.gitignore
 
 

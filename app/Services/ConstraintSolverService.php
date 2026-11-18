@@ -269,6 +269,16 @@ class ConstraintSolverService
             }
         }
 
+        // 4. Custom constraints evaluation on hypothetical state
+        $hypotheticalFacts = $facts;
+        $this->applyMessageFacts($message['facts'] ?? [], $hypotheticalFacts);
+        $hypotheticalComputed = $this->solveConstraints($hypotheticalFacts);
+
+        $customConflict = $this->evaluateCustomConstraints($message, $hypotheticalFacts, $previousComputed, $hypotheticalComputed);
+        if ($customConflict !== null) {
+            return $customConflict;
+        }
+
         return null;
     }
 
@@ -433,9 +443,28 @@ class ConstraintSolverService
         }
 
         if (! empty($sourceFacts['custom_constraints']) && is_array($sourceFacts['custom_constraints'])) {
-            foreach ($sourceFacts['custom_constraints'] as $cc) {
-                $targetFacts['custom_constraints'][] = $cc;
+            $existingConstraints = [];
+            foreach ($targetFacts['custom_constraints'] ?? [] as $cc) {
+                if (is_array($cc)) {
+                    $key = strtolower(trim(($cc['area'] ?? '').':'.($cc['rule_type'] ?? '').':'.($cc['target'] ?? '')));
+                    $existingConstraints[$key] = $cc;
+                }
             }
+
+            foreach ($sourceFacts['custom_constraints'] as $cc) {
+                if (is_array($cc)) {
+                    $key = strtolower(trim(($cc['area'] ?? '').':'.($cc['rule_type'] ?? '').':'.($cc['target'] ?? '')));
+                    $existingConstraints[$key] = [
+                        'area' => strtolower(trim((string) ($cc['area'] ?? ''))),
+                        'rule_type' => strtolower(trim((string) ($cc['rule_type'] ?? ''))),
+                        'target' => strtolower(trim((string) ($cc['target'] ?? ''))),
+                        'value' => $cc['value'] ?? null,
+                        'description' => (string) ($cc['description'] ?? ''),
+                    ];
+                }
+            }
+
+            $targetFacts['custom_constraints'] = array_values($existingConstraints);
         }
     }
 
@@ -473,10 +502,57 @@ class ConstraintSolverService
 
         $totalBudgetLimit = (float) ($facts['event']['total_budget_limit'] ?? 0);
 
-        // Optimal Venue Selection: capacity >= totalHeadcount, prefer generator if budget fits
-        $validVenues = array_values(array_filter($facts['venue_options'] ?? [], function ($v) use ($totalHeadcount) {
-            return (int) ($v['capacity'] ?? 0) >= $totalHeadcount;
+        // Optimal Venue Selection: capacity >= totalHeadcount and fulfilling feature requirements
+        $requiredFeatures = [];
+        foreach ($facts['venue_requirements'] ?? [] as $req) {
+            if (is_string($req) && trim($req) !== '') {
+                $requiredFeatures[] = strtolower(trim($req));
+            }
+        }
+        foreach ($facts['custom_constraints'] ?? [] as $cc) {
+            if (is_array($cc) && ($cc['area'] ?? '') === 'venue' && ($cc['rule_type'] ?? '') === 'required') {
+                $feat = trim((string) ($cc['target'] ?? '')) ?: trim((string) ($cc['value'] ?? ''));
+                if ($feat !== '') {
+                    $requiredFeatures[] = strtolower($feat);
+                }
+            }
+        }
+        $requiredFeatures = array_values(array_unique($requiredFeatures));
+
+        $forbiddenFeatures = [];
+        foreach ($facts['custom_constraints'] ?? [] as $cc) {
+            if (is_array($cc) && ($cc['area'] ?? '') === 'venue' && ($cc['rule_type'] ?? '') === 'forbidden') {
+                $feat = trim((string) ($cc['target'] ?? '')) ?: trim((string) ($cc['value'] ?? ''));
+                if ($feat !== '') {
+                    $forbiddenFeatures[] = strtolower($feat);
+                }
+            }
+        }
+        $forbiddenFeatures = array_values(array_unique($forbiddenFeatures));
+
+        $validVenues = array_values(array_filter($facts['venue_options'] ?? [], function ($v) use ($totalHeadcount, $requiredFeatures, $forbiddenFeatures) {
+            if ((int) ($v['capacity'] ?? 0) < $totalHeadcount) {
+                return false;
+            }
+            foreach ($requiredFeatures as $req) {
+                if (! $this->venueHasFeature($v, $req)) {
+                    return false;
+                }
+            }
+            foreach ($forbiddenFeatures as $forb) {
+                if ($this->venueHasFeature($v, $forb)) {
+                    return false;
+                }
+            }
+
+            return true;
         }));
+
+        if (empty($validVenues) && empty($requiredFeatures) && empty($forbiddenFeatures)) {
+            $validVenues = array_values(array_filter($facts['venue_options'] ?? [], function ($v) use ($totalHeadcount) {
+                return (int) ($v['capacity'] ?? 0) >= $totalHeadcount;
+            }));
+        }
 
         usort($validVenues, function ($a, $b) {
             $aGen = $this->venueHasGenerator($a);
@@ -538,20 +614,263 @@ class ConstraintSolverService
      *
      * @param  array<string, mixed>  $venue
      */
-    protected function venueHasGenerator(array $venue): bool
+    public function venueHasGenerator(array $venue): bool
     {
+        return $this->venueHasFeature($venue, 'generator');
+    }
+
+    /**
+     * Check if a venue satisfies a specific named feature or requirement.
+     *
+     * @param  array<string, mixed>  $venue
+     */
+    public function venueHasFeature(array $venue, string $feature): bool
+    {
+        $feature = strtolower(trim($feature));
+        if ($feature === '') {
+            return false;
+        }
+
+        $featureTokens = array_filter(preg_split('/[\s_\-]+/', $feature));
+
+        // Check venue features list
         $features = $venue['features'] ?? [];
         if (is_array($features)) {
             foreach ($features as $f) {
-                if (stripos((string) $f, 'generator') !== false || stripos((string) $f, 'power') !== false) {
+                $fLower = strtolower(trim((string) $f));
+                if (str_contains($fLower, $feature)) {
                     return true;
+                }
+                foreach ($featureTokens as $token) {
+                    if (strlen($token) >= 4 && str_contains($fLower, $token)) {
+                        return true;
+                    }
                 }
             }
         }
 
-        $name = (string) ($venue['name'] ?? '');
+        // Check venue name
+        $nameLower = strtolower(trim((string) ($venue['name'] ?? '')));
+        if (str_contains($nameLower, $feature)) {
+            return true;
+        }
+        foreach ($featureTokens as $token) {
+            if (strlen($token) >= 4 && str_contains($nameLower, $token)) {
+                return true;
+            }
+        }
 
-        return stripos($name, 'generator') !== false;
+        return false;
+    }
+
+    /**
+     * Evaluate active and incoming custom constraints against the proposed plan state.
+     *
+     * @param  array<string, mixed>  $message
+     * @param  array<string, mixed>  $hypotheticalFacts
+     * @param  array<string, mixed>  $previousComputed
+     * @param  array<string, mixed>  $hypotheticalComputed
+     * @return string|null Rejection reason if conflict detected, null if valid
+     */
+    public function evaluateCustomConstraints(
+        array $message,
+        array $hypotheticalFacts,
+        array $previousComputed,
+        array $hypotheticalComputed
+    ): ?string {
+        $customConstraints = $hypotheticalFacts['custom_constraints'] ?? [];
+        if (! is_array($customConstraints) || empty($customConstraints)) {
+            return null;
+        }
+
+        $totalHeadcount = (int) ($hypotheticalComputed['total_headcount'] ?? 0);
+
+        foreach ($customConstraints as $cc) {
+            if (! is_array($cc)) {
+                continue;
+            }
+
+            $area = strtolower(trim((string) ($cc['area'] ?? '')));
+            $ruleType = strtolower(trim((string) ($cc['rule_type'] ?? '')));
+            $target = strtolower(trim((string) ($cc['target'] ?? '')));
+            $value = $cc['value'] ?? null;
+            $desc = trim((string) ($cc['description'] ?? ''));
+
+            // 1. VENUE CONSTRAINTS
+            if ($area === 'venue') {
+                if ($ruleType === 'required') {
+                    $feature = $target !== '' ? $target : strtolower(trim((string) $value));
+                    $selectedVenue = $hypotheticalComputed['selected_venue'] ?? null;
+
+                    if ($selectedVenue === null || ! $this->venueHasFeature($selectedVenue, $feature)) {
+                        $reasonDesc = $desc ?: "Mandatory requirement for {$feature}";
+
+                        return "Conflict: Required venue feature '{$feature}' cannot be satisfied by any available venue with sufficient capacity ({$totalHeadcount} attendees) ({$reasonDesc}).";
+                    }
+                } elseif ($ruleType === 'forbidden') {
+                    $feature = $target !== '' ? $target : strtolower(trim((string) $value));
+                    $selectedVenue = $hypotheticalComputed['selected_venue'] ?? null;
+
+                    if ($selectedVenue !== null && $this->venueHasFeature($selectedVenue, $feature)) {
+                        $venueName = $selectedVenue['name'] ?? 'Selected venue';
+                        $reasonDesc = $desc ?: "Forbidden attribute: {$feature}";
+
+                        return "Conflict: Venue '{$venueName}' contains forbidden attribute '{$feature}' ({$reasonDesc}).";
+                    }
+                } elseif ($ruleType === 'min' && ($target === 'capacity' || $target === 'seats')) {
+                    $minCap = (int) $value;
+                    $selectedVenue = $hypotheticalComputed['selected_venue'] ?? null;
+                    $cap = (int) ($selectedVenue['capacity'] ?? 0);
+                    if ($selectedVenue !== null && $cap < $minCap) {
+                        return "Conflict: Venue capacity ({$cap}) is less than required minimum capacity of {$minCap} ({$desc}).";
+                    }
+                }
+            }
+
+            // 2. FOOD CONSTRAINTS
+            if ($area === 'food') {
+                if ($ruleType === 'min') {
+                    $minBoxes = (int) $value;
+                    $forcedBoxes = null;
+                    foreach ($message['facts']['catering_options'] ?? [] as $opt) {
+                        if (isset($opt['forced_box_count']) && $opt['forced_box_count'] !== null) {
+                            $forcedBoxes = (int) $opt['forced_box_count'];
+                        }
+                    }
+
+                    if ($forcedBoxes !== null && $forcedBoxes < $minBoxes) {
+                        $reasonDesc = $desc ?: "Minimum {$minBoxes} required";
+
+                        return "Conflict: Ordered food boxes ({$forcedBoxes}) is less than required minimum of {$minBoxes} ({$reasonDesc}).";
+                    }
+
+                    if (str_contains($target, 'veg') || str_contains($target, 'diet') || str_contains($target, 'halal')) {
+                        if ($forcedBoxes !== null && $forcedBoxes < $minBoxes) {
+                            return "Conflict: Food order does not satisfy dietary requirement of {$minBoxes} {$target} portions ({$desc}).";
+                        }
+                    }
+                } elseif ($ruleType === 'max') {
+                    if (str_contains($target, 'cost_per_head') || str_contains($target, 'price') || str_contains($target, 'head')) {
+                        $maxCph = (float) $value;
+                        $selectedCatering = $hypotheticalComputed['selected_catering'] ?? null;
+                        $cph = (float) ($selectedCatering['cost_per_head'] ?? 0);
+                        if ($cph > $maxCph) {
+                            return 'Conflict: Catering cost per head (Rs '.number_format($cph).') exceeds maximum allowed cap of Rs '.number_format($maxCph)." ({$desc}).";
+                        }
+                    } elseif (str_contains($target, 'food_cost') || str_contains($target, 'catering_cost')) {
+                        $maxFoodCost = (float) $value;
+                        $cateringCost = (float) ($hypotheticalComputed['catering_cost'] ?? 0);
+                        if ($cateringCost > $maxFoodCost) {
+                            return 'Conflict: Catering total cost (Rs '.number_format($cateringCost).') exceeds maximum catering cap of Rs '.number_format($maxFoodCost)." ({$desc}).";
+                        }
+                    }
+                }
+            }
+
+            // 3. BUDGET CONSTRAINTS
+            if ($area === 'budget') {
+                if ($ruleType === 'max') {
+                    $maxBudget = (float) $value;
+
+                    // Per-category fixed expense caps
+                    foreach ($hypotheticalFacts['fixed_expenses'] ?? [] as $exp) {
+                        $expItem = strtolower(trim((string) ($exp['item'] ?? '')));
+                        $targetClean = strtolower(trim((string) $target));
+
+                        if ($targetClean !== '' && (str_contains($expItem, $targetClean) || str_contains($targetClean, $expItem))) {
+                            $cost = (float) ($exp['cost'] ?? 0);
+                            if ($cost > $maxBudget) {
+                                return "Conflict: Expense for '{$exp['item']}' (Rs ".number_format($cost).') exceeds maximum category budget cap of Rs '.number_format($maxBudget)." ({$desc}).";
+                            }
+                        }
+                    }
+
+                    // Total event expenditure cap
+                    if (in_array($target, ['total_budget', 'total_cost', 'total_spend', 'spend', 'overall'], true)) {
+                        $totalCost = (float) ($hypotheticalComputed['total_cost'] ?? 0);
+                        if ($totalCost > $maxBudget) {
+                            return 'Conflict: Projected total event spend (Rs '.number_format($totalCost).') exceeds maximum budget limit of Rs '.number_format($maxBudget)." ({$desc}).";
+                        }
+                    }
+
+                    // Venue expenditure cap
+                    if (in_array($target, ['venue_cost', 'venue_budget', 'venue'], true)) {
+                        $venueCost = (float) ($hypotheticalComputed['venue_cost'] ?? 0);
+                        if ($venueCost > $maxBudget) {
+                            return 'Conflict: Venue cost (Rs '.number_format($venueCost).') exceeds maximum venue budget cap of Rs '.number_format($maxBudget)." ({$desc}).";
+                        }
+                    }
+                } elseif ($ruleType === 'min') {
+                    if (in_array($target, ['remaining_budget', 'reserve', 'contingency', 'surplus'], true)) {
+                        $minReserve = (float) $value;
+                        $remaining = (float) ($hypotheticalComputed['remaining_budget'] ?? 0);
+                        if ($remaining < $minReserve) {
+                            return 'Conflict: Remaining budget (Rs '.number_format($remaining).') falls below required minimum reserve of Rs '.number_format($minReserve)." ({$desc}).";
+                        }
+                    }
+                }
+            }
+
+            // 4. JUDGING CONSTRAINTS
+            if ($area === 'judging') {
+                if ($ruleType === 'max') {
+                    $maxWorkload = (float) $value;
+                    $teamsCount = (int) ($hypotheticalComputed['teams_count'] ?? 0);
+                    $confirmedJudges = (int) ($hypotheticalComputed['confirmed_judges'] ?? 0);
+
+                    if (in_array($target, ['teams_per_judge', 'max_teams_per_judge', 'workload', 'teams', 'shift_limit'], true)) {
+                        $effectiveWorkload = $confirmedJudges > 0 ? ceil($teamsCount / $confirmedJudges) : $teamsCount;
+                        if ($effectiveWorkload > $maxWorkload) {
+                            return "Conflict: Judge workload ({$effectiveWorkload} teams/judge) exceeds maximum permitted limit of {$maxWorkload} ({$desc}).";
+                        }
+                    }
+                } elseif ($ruleType === 'min') {
+                    if (in_array($target, ['confirmed_judges', 'judges_count', 'judges'], true)) {
+                        $minJudges = (int) $value;
+                        $confirmedJudges = (int) ($hypotheticalComputed['confirmed_judges'] ?? 0);
+                        if ($confirmedJudges > 0 && $confirmedJudges < $minJudges) {
+                            return "Conflict: Confirmed judges ({$confirmedJudges}) is below required minimum of {$minJudges} ({$desc}).";
+                        }
+                    }
+                }
+            }
+
+            // 5. SCHEDULE CONSTRAINTS
+            if ($area === 'schedule') {
+                if ($ruleType === 'min') {
+                    if (in_array($target, ['break_duration', 'break_interval', 'prayer_break', 'lunch_break', 'gap', 'break'], true)) {
+                        $minBreak = (int) $value;
+                        foreach ($hypotheticalFacts['schedule_constraints'] ?? [] as $sc) {
+                            $type = strtolower((string) ($sc['type'] ?? ''));
+                            $scDesc = strtolower((string) ($sc['description'] ?? ''));
+                            if (str_contains($type, 'break') || str_contains($scDesc, 'break') || str_contains($scDesc, 'prayer')) {
+                                $duration = (int) ($sc['duration_minutes'] ?? 0);
+                                if ($duration > 0 && $duration < $minBreak) {
+                                    return "Conflict: Break duration ({$duration} mins) is less than required minimum of {$minBreak} mins ({$desc}).";
+                                }
+                            }
+                        }
+                    }
+                } elseif ($ruleType === 'max') {
+                    if (in_array($target, ['duration_hours', 'event_duration', 'total_duration'], true)) {
+                        $maxHours = (float) $value;
+                        $actualHours = (float) ($hypotheticalFacts['event']['duration_hours'] ?? 0);
+                        if ($actualHours > $maxHours) {
+                            return "Conflict: Event duration ({$actualHours} hrs) exceeds maximum permitted limit of {$maxHours} hrs ({$desc}).";
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check if overall budget limit is exceeded
+        $totalCost = (float) ($hypotheticalComputed['total_cost'] ?? 0);
+        $totalBudgetLimit = (float) ($hypotheticalFacts['event']['total_budget_limit'] ?? 0);
+        if ($totalBudgetLimit > 0 && $totalCost > $totalBudgetLimit) {
+            return 'Conflict: Total event cost (Rs '.number_format($totalCost).') exceeds total budget limit of Rs '.number_format($totalBudgetLimit).'.';
+        }
+
+        return null;
     }
 
     /**
@@ -582,10 +901,37 @@ class ConstraintSolverService
             $scheduledMinutes += (int) ($sc['delay_minutes'] ?? 0);
         }
 
+        // Check venue requirements
+        $venueRequirementsMet = true;
+        if (! empty($computed['selected_venue'])) {
+            $requiredFeatures = [];
+            foreach ($facts['venue_requirements'] ?? [] as $req) {
+                if (is_string($req) && trim($req) !== '') {
+                    $requiredFeatures[] = strtolower(trim($req));
+                }
+            }
+            foreach ($facts['custom_constraints'] ?? [] as $cc) {
+                if (is_array($cc) && ($cc['area'] ?? '') === 'venue' && ($cc['rule_type'] ?? '') === 'required') {
+                    $feat = trim((string) ($cc['target'] ?? '')) ?: trim((string) ($cc['value'] ?? ''));
+                    if ($feat !== '') {
+                        $requiredFeatures[] = strtolower($feat);
+                    }
+                }
+            }
+            foreach ($requiredFeatures as $req) {
+                if (! $this->venueHasFeature($computed['selected_venue'], $req)) {
+                    $venueRequirementsMet = false;
+                    break;
+                }
+            }
+        } else {
+            $venueRequirementsMet = false;
+        }
+
         return [
             'correct_figures' => $totalHeadcount === ($students + $staff + $requiredJudges + $extra) && $totalHeadcount > 0,
             'within_budget' => $totalCost <= $totalBudgetLimit,
-            'venue_fits' => $venueCapacity >= $totalHeadcount && $venueCapacity > 0,
+            'venue_fits' => $venueCapacity >= $totalHeadcount && $venueCapacity > 0 && $venueRequirementsMet,
             'schedule_valid' => $scheduledMinutes <= ($durationHours * 60),
             'enough_judges' => $confirmedJudges >= $requiredJudges,
             'all_areas_covered' => ! empty($computed['selected_venue'])
@@ -650,6 +996,20 @@ class ConstraintSolverService
             || ($prevFacts['event']['total_budget_limit'] ?? 0) != ($newFacts['event']['total_budget_limit'] ?? 0);
         if ($budgetChanged) {
             $areas[] = 'budget';
+        }
+
+        // Custom constraints area detection
+        if (($prevFacts['custom_constraints'] ?? []) != ($newFacts['custom_constraints'] ?? [])) {
+            $prevKeys = array_map(fn ($c) => ($c['area'] ?? '').':'.($c['rule_type'] ?? '').':'.($c['target'] ?? ''), $prevFacts['custom_constraints'] ?? []);
+            foreach ($newFacts['custom_constraints'] ?? [] as $newCc) {
+                $key = ($newCc['area'] ?? '').':'.($newCc['rule_type'] ?? '').':'.($newCc['target'] ?? '');
+                if (! in_array($key, $prevKeys, true)) {
+                    $area = strtolower(trim((string) ($newCc['area'] ?? '')));
+                    if (in_array($area, ['venue', 'schedule', 'food', 'judging', 'budget'], true) && ! in_array($area, $areas, true)) {
+                        $areas[] = $area;
+                    }
+                }
+            }
         }
 
         return $areas;
