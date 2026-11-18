@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\PlanArea;
+use App\Models\IngestedMessage;
 use App\Models\LlmTrace;
 use App\Models\PlanState;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -410,6 +411,11 @@ test('end-to-end pipeline executes initial pack, valid update, and catches inval
     expect($state->validation_summary['schedule_valid'])->toBeTrue();
     expect($state->validation_summary['enough_judges'])->toBeTrue();
     expect($state->validation_summary['all_areas_covered'])->toBeTrue();
+
+    // Verify messages: Message 3 superseded, Message 7 rejected, Message 8 accepted (delay notice)
+    expect(IngestedMessage::where('plan_state_id', $state->id)->where('raw_index', '3')->first()->status)->toBe('superseded');
+    expect(IngestedMessage::where('plan_state_id', $state->id)->where('raw_index', '7')->first()->status)->toBe('rejected');
+    expect(IngestedMessage::where('plan_state_id', $state->id)->where('raw_index', '8')->first()->status)->toBe('accepted');
 
     // Verify files created
     expect(File::exists(storage_path('app/output/final_plan.txt')))->toBeTrue();

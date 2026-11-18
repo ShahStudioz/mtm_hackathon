@@ -165,6 +165,12 @@ test('initial sample pack extracts facts, computes total headcount as 177, super
     expect($msg7->status)->toBe('rejected');
     expect($msg7->rejection_reason)->toContain('Unapproved');
 
+    // Message 8 (Judge 10 min late notice) is an operational constraint and MUST be accepted
+    $msg8 = IngestedMessage::where('plan_state_id', $state->id)->where('raw_index', '8')->first();
+    expect($msg8)->not->toBeNull();
+    expect($msg8->status)->toBe('accepted');
+    expect($msg8->rejection_reason)->toBeNull();
+
     // All checks in validation_summary pass
     expect($result['validation_summary']['correct_figures'])->toBeTrue();
     expect($result['validation_summary']['within_budget'])->toBeTrue();

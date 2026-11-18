@@ -75,8 +75,8 @@ Each object in the "messages" array must have:
 - "date_str": string or null
 - "normalized_date_sort": integer YYYYMMDD (assume 2026 if only day/month given, or sequential number if no date)
 - "raw_content": string (exact message text)
-- "is_unapproved_wish": boolean (true IF the sender is asking/wishing for an optional non-essential expense without organizer approval, e.g. DJ, concert)
-- "intent": string ("directive" | "vendor_quote" | "constraint_update" | "forced_override" | "unapproved_request" | "irrelevant")
+- "is_unapproved_wish": boolean (strictly true ONLY IF the sender asks for an unapproved, optional, non-essential expense/luxury like a DJ, concert, afterparty, or band. Schedule updates, delays, traffic, quotes, directives, and constraints are NEVER unapproved wishes!)
+- "intent": string ("directive" | "vendor_quote" | "constraint_update" | "forced_override" | "unapproved_request" | "informational")
 - "facts": object with ONLY present/extracted keys (OMIT null or empty fields to keep output compact):
   - "duration_hours": number
   - "students_count": int
@@ -100,7 +100,8 @@ Critical extraction guidelines:
 4. If a message specifies forced food boxes (e.g. rounded down to N boxes), set catering_options with forced_box_count=N and intent="forced_override".
 5. If a message updates a single bill/expense, set fixed_expenses accordingly and intent="constraint_update".
 6. Explicitly capture ANY domain constraint, requirement, exclusion, dietary rule (e.g. vegetarian or halal counts), equipment or accessibility rule (e.g. standby generator, wheelchair access, projector, Wi-Fi), category budget cap, break interval rule, or judge workload/shift limit into "custom_constraints" with area, rule_type, target, value, and description.
-7. Return ONLY a valid JSON object matching this schema. No markdown explanations outside JSON.
+7. Schedule and Delay Constraints: If a message mentions a judge, speaker, or participant being late, delayed, or stuck in traffic (e.g. "I may be 10 minutes late on the day. Traffic on Srinagar Highway"), extract it into "schedule_constraints" with {"type": "delay", "description": "Judge late arrival buffer (traffic)", "delay_minutes": 10, "duration_minutes": 10}, and set intent="constraint_update" and is_unapproved_wish=false. This is a valid operational timing buffer, NEVER an unapproved wish!
+8. Return ONLY a valid JSON object matching this schema. No markdown explanations outside JSON.
 PROMPT;
     }
 

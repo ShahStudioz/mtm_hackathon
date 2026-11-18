@@ -58,15 +58,39 @@ class ConstraintSolverService
             ]);
         }
 
-        // 2. Identify unapproved wishes and irrelevant messages
+        // 2. Identify unapproved wishes vs operational timing notices
         foreach ($messages as $idx => $msg) {
+            $rawContent = (string) ($msg['raw_content'] ?? '');
+
+            // Operational timing notices (late arrivals, traffic delays) are valid operational constraints, NEVER unapproved wishes
+            $isDelayNotice = preg_match('/\b(?:(\d+)\s*(?:minute|min|m)s?\s*late|traffic|delayed?)\b/i', $rawContent, $delayMatches);
+            if ($isDelayNotice) {
+                $delayMinutes = isset($delayMatches[1]) && is_numeric($delayMatches[1]) ? (int) $delayMatches[1] : 10;
+                if (empty($messages[$idx]['facts']['schedule_constraints'])) {
+                    $messages[$idx]['facts']['schedule_constraints'] = [
+                        [
+                            'type' => 'delay',
+                            'description' => 'Judge late arrival buffer (traffic)',
+                            'delay_minutes' => $delayMinutes,
+                            'duration_minutes' => $delayMinutes,
+                        ],
+                    ];
+                }
+                $savedModels[$idx]->update([
+                    'status' => 'accepted',
+                    'rejection_reason' => null,
+                ]);
+
+                continue;
+            }
+
             $isUnapproved = ($msg['is_unapproved_wish'] ?? false) === true
                 || ($msg['intent'] ?? '') === 'unapproved_request'
-                || ($msg['intent'] ?? '') === 'irrelevant';
+                || preg_match('/\b(dj|band|concert|afterparty|gaming\s+lounge)\b/i', $rawContent);
 
             if ($isUnapproved) {
                 $item = $msg['facts']['fixed_expenses'][0]['item']
-                    ?? (preg_match('/\b(dj|band|concert|party)\b/i', $msg['raw_content'] ?? '', $matches) ? strtoupper($matches[1]) : 'optional expense');
+                    ?? (preg_match('/\b(dj|band|concert|party|afterparty)\b/i', $rawContent, $matches) ? strtoupper($matches[1]) : 'optional expense');
 
                 $savedModels[$idx]->update([
                     'status' => 'rejected',
@@ -129,8 +153,11 @@ class ConstraintSolverService
         $dateStr = isset($firstMsg['date_str']) ? (string) $firstMsg['date_str'] : null;
         $rawContent = (string) ($firstMsg['raw_content'] ?? '');
 
+        // Delay / late arrival notices are operational constraints, NOT unapproved wishes
+        $isDelayNotice = preg_match('/\b(?:(\d+)\s*(?:minute|min|m)s?\s*late|traffic|delayed?)\b/i', $rawContent);
+
         // Check if message is an unapproved wish
-        if (($firstMsg['is_unapproved_wish'] ?? false) === true || ($firstMsg['intent'] ?? '') === 'unapproved_request') {
+        if (! $isDelayNotice && (($firstMsg['is_unapproved_wish'] ?? false) === true || ($firstMsg['intent'] ?? '') === 'unapproved_request')) {
             $item = $firstMsg['facts']['fixed_expenses'][0]['item'] ?? 'optional expense';
             $rejectionReason = "Rejected: Unapproved optional expense request ({$item}) outside core hackathon requirements";
 
@@ -417,6 +444,26 @@ class ConstraintSolverService
         if (! empty($sourceFacts['schedule_constraints']) && is_array($sourceFacts['schedule_constraints'])) {
             foreach ($sourceFacts['schedule_constraints'] as $sc) {
                 $targetFacts['schedule_constraints'][] = $sc;
+            }
+        }
+
+        // Delay / late arrival notices fallback
+        if (preg_match('/\b(?:(\d+)\s*(?:minute|min|m)s?\s*late|traffic|delayed?)\b/i', $rawContent ?? '', $dm)) {
+            $delayMins = isset($dm[1]) && is_numeric($dm[1]) ? (int) $dm[1] : 10;
+            $alreadyHas = false;
+            foreach ($targetFacts['schedule_constraints'] as $sc) {
+                if (($sc['type'] ?? '') === 'delay' || str_contains(strtolower($sc['description'] ?? ''), 'late')) {
+                    $alreadyHas = true;
+                    break;
+                }
+            }
+            if (! $alreadyHas) {
+                $targetFacts['schedule_constraints'][] = [
+                    'type' => 'delay',
+                    'description' => "Judge late arrival buffer ({$delayMins} mins)",
+                    'delay_minutes' => $delayMins,
+                    'duration_minutes' => $delayMins,
+                ];
             }
         }
 
@@ -907,8 +954,7 @@ class ConstraintSolverService
 
         $scheduledMinutes = 0;
         foreach ($facts['schedule_constraints'] ?? [] as $sc) {
-            $scheduledMinutes += (int) ($sc['duration_minutes'] ?? 0);
-            $scheduledMinutes += (int) ($sc['delay_minutes'] ?? 0);
+            $scheduledMinutes += max((int) ($sc['duration_minutes'] ?? 0), (int) ($sc['delay_minutes'] ?? 0));
         }
 
         // Check venue requirements
