@@ -10,20 +10,15 @@ Selected Venue: Hall B
 Capacity: 200 | Required Headcount: 177
 Cost: Rs 150,000
 Features: standby generator
-Justification: Hall B fits 177 attendees comfortably and has standby generator within budget.
+Justification: Selected within budget.
 
 --------------------------------------------------------------------------------
 2. SCHEDULE PLAN
 --------------------------------------------------------------------------------
 Total Duration: 240 minutes
 Timeline:
-  * 00:00 - 00:30: Kickoff & Registration (30 mins) - Notes: Setup
-  * 00:30 - 02:00: Hacking Phase 1 (90 mins) - Notes: Sprint
-  * 02:00 - 02:15: Prayer Break (15 mins) - Notes: 15m prayer break
-  * 02:15 - 03:00: Hacking Phase 2 (45 mins) - Notes: Buffer accommodates late judge
-  * 03:00 - 03:45: Judging Sessions (45 mins) - Notes: Parallel evaluation
-  * 03:45 - 04:00: Closing Ceremony (15 mins) - Notes: Prizes
-Constraints Honored: 15-minute prayer break, Judge delay buffer, Total 240 minutes
+  * 00:00 - 04:00: Hackathon (240 mins) - Notes: Full event
+Constraints Honored: 240 mins
 
 --------------------------------------------------------------------------------
 3. FOOD & CATERING PLAN
@@ -32,7 +27,7 @@ Selected Package: Standard lunch box
 Headcount Breakdown: 150 students + 10 staff + 17 judges = 177 total
 Unit Price: Rs 1,200/head | Delivery: Rs 0
 Total Food Cost: Rs 212,400
-Notes: Standard lunch box selected with free delivery.
+Notes: Free delivery
 
 --------------------------------------------------------------------------------
 4. JUDGING PLAN
@@ -41,24 +36,19 @@ Teams: 50 | Confirmed Judges: 20
 Assigned Active Judges: 17 | Standby Judges: 3
 Rules: max 3 teams/judge, 15 mins/team
 Honorarium: Rs 5,000 each | Total Judging Cost: Rs 85,000
-Contingency / Late Judge Notes: 3 standby judges ready; late judge delay absorbed in schedule.
+Contingency / Late Judge Notes: 3 standby judges
 
 --------------------------------------------------------------------------------
 5. BUDGET PLAN
 --------------------------------------------------------------------------------
 Total Budget Limit: Rs 650,000
-Total Spent: Rs 582,400
-Remaining Balance: Rs 67,600
+Total Spent: Rs 447,400
+Remaining Balance: Rs 202,600
 Budget Status: PASS (Within Budget)
 Line Items:
-  * [Venue] Hall B (seats 200, generator): Rs 150,000
-  * [Catering] 177 Standard lunch boxes: Rs 212,400
-  * [Judging] 17 Judges honorarium (Rs 5,000 each): Rs 85,000
-  * [Prizes] Approved prizes: Rs 100,000
-  * [Backup Internet] Backup internet connection: Rs 20,000
-  * [Printing] Event printing: Rs 15,000
-Excluded / Rejected Items:
-  * Excluded: Unapproved optional expense request (DJ) outside core hackathon requirements
+  * [Venue] Hall B: Rs 150,000
+  * [Food] Catering: Rs 212,400
+  * [Judging] Judges: Rs 85,000
 
 ================================================================================
                               VALIDATION SUMMARY                                
@@ -73,6 +63,4 @@ Excluded / Rejected Items:
 ================================================================================
                         REJECTED / SUPERSEDED MESSAGES                          
 ================================================================================
-- [SUPERSEDED] Message #3 (Caterer): Superseded by newer message from same sender/category
-- [REJECTED] Message #7 (Student society): Rejected: Unapproved optional expense request (DJ) outside core hackathon requirements
-- [REJECTED] Message #trap-1 (Caterer): Conflict: Message attempts to order 100 food boxes, which is less than the required total headcount of 177 people (150 students + 10 staff + 17 judges).
+None. All ingested messages were valid and accepted.
