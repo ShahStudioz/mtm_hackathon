@@ -179,7 +179,7 @@ class ConstraintSolverService
         }
 
         // Merge update into working facts
-        $this->applyMessageFacts($firstMsg['facts'] ?? [], $workingFacts);
+        $this->applyMessageFacts($firstMsg['facts'] ?? [], $workingFacts, $rawContent);
 
         $newComputed = $this->solveConstraints($workingFacts);
         $validationSummary = $this->computeValidationSummary($workingFacts, $newComputed);
@@ -271,7 +271,7 @@ class ConstraintSolverService
 
         // 4. Custom constraints evaluation on hypothetical state
         $hypotheticalFacts = $facts;
-        $this->applyMessageFacts($message['facts'] ?? [], $hypotheticalFacts);
+        $this->applyMessageFacts($message['facts'] ?? [], $hypotheticalFacts, $message['raw_content'] ?? null);
         $hypotheticalComputed = $this->solveConstraints($hypotheticalFacts);
 
         $customConflict = $this->evaluateCustomConstraints($message, $hypotheticalFacts, $previousComputed, $hypotheticalComputed);
@@ -384,7 +384,7 @@ class ConstraintSolverService
                 continue;
             }
 
-            $this->applyMessageFacts($msg['facts'] ?? [], $canonical);
+            $this->applyMessageFacts($msg['facts'] ?? [], $canonical, $msg['raw_content'] ?? null);
         }
 
         return $canonical;
@@ -396,11 +396,21 @@ class ConstraintSolverService
      * @param  array<string, mixed>  $sourceFacts
      * @param  array<string, mixed>  $targetFacts
      */
-    protected function applyMessageFacts(array $sourceFacts, array &$targetFacts): void
+    protected function applyMessageFacts(array $sourceFacts, array &$targetFacts, ?string $rawContent = null): void
     {
         foreach (['duration_hours', 'students_count', 'team_size', 'teams_count', 'staff_count', 'extra_participants_count', 'total_budget_limit'] as $key) {
             if (isset($sourceFacts[$key]) && $sourceFacts[$key] !== null) {
                 $targetFacts['event'][$key] = $sourceFacts[$key];
+            }
+        }
+
+        // Dynamic budget limit fallback if LLM omitted total_budget_limit key
+        if (empty($targetFacts['event']['total_budget_limit']) && ! empty($rawContent)) {
+            if (preg_match('/\bbudget\s+(?:is|cap|limit)?\s*(?:Rs\.?|PKR)?\s*([\d,]+)/i', $rawContent, $m)) {
+                $parsedBudget = (float) str_replace(',', '', $m[1]);
+                if ($parsedBudget > 0) {
+                    $targetFacts['event']['total_budget_limit'] = $parsedBudget;
+                }
             }
         }
 

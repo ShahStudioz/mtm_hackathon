@@ -84,7 +84,7 @@ Each object in the "messages" array must have:
   - "teams_count": int
   - "staff_count": int
   - "extra_participants_count": int
-  - "total_budget_limit": number
+  - "total_budget_limit": number (CRITICAL: overall event budget cap whenever mentioned, e.g. "budget is Rs 650,000" -> 650000)
   - "schedule_constraints": array of objects [{ "type": string, "description": string, "duration_minutes": number, "delay_minutes": number }]
   - "venue_options": array of objects [{ "name": string, "capacity": int, "cost": number, "features": array of strings }]
   - "venue_requirements": array of strings
