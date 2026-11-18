@@ -144,8 +144,8 @@ export default function Dashboard({
     const modelName = traces.length > 0 ? traces[0].model_name : 'llama-3.3-70b-versatile';
 
     const facts = planState?.extracted_facts || {};
-    const headcount = facts.headcount || 177;
-    const budgetLimit = facts.budget_limit || 650000;
+    const computed = facts.computed || {};
+    const headcount = computed.total_headcount ?? (facts.event?.students_count ? (Number(facts.event?.students_count || 0) + Number(facts.event?.staff_count || 0) + Number(computed.required_judges || 0)) : 177);
 
     const venue = planState?.venue_plan || {};
     const schedule = planState?.schedule_plan || {};
@@ -153,9 +153,38 @@ export default function Dashboard({
     const judging = planState?.judging_plan || {};
     const budget = planState?.budget_plan || {};
 
-    const totalSpend = budget.total_allocated || 0;
-    const surplus = budget.remaining_buffer ?? (budgetLimit - totalSpend);
+    const budgetLimit = budget.budget_limit ?? facts.event?.total_budget_limit ?? computed.total_budget_limit ?? 650000;
+    const totalSpend = budget.total_spent ?? computed.total_cost ?? budget.total_allocated ?? 0;
+    const surplus = budget.remaining_balance ?? computed.remaining_budget ?? (budgetLimit - totalSpend);
     const spendPercentage = budgetLimit > 0 ? Math.min(100, Math.round((totalSpend / budgetLimit) * 100)) : 0;
+
+    // Food fields
+    const catererName = food.selected_package || food.selected_caterer || computed.selected_catering?.name || 'Standard Catering Package';
+    const foodUnitCost = food.unit_cost ?? food.cost_per_head ?? computed.selected_catering?.cost_per_head ?? 0;
+    const totalFoodCost = food.total_food_cost ?? food.total_cost ?? computed.catering_cost ?? (foodUnitCost * headcount);
+    const totalMealBoxes = food.headcount_breakdown?.total ?? food.total_boxes ?? computed.total_headcount ?? headcount;
+    const deliveryCost = food.delivery_cost ?? computed.selected_catering?.delivery_cost ?? 0;
+
+    // Judging fields
+    const assignedJudges = judging.assigned_judges ?? computed.required_judges ?? 0;
+    const confirmedJudges = judging.confirmed_judges ?? computed.confirmed_judges ?? assignedJudges;
+    const standbyJudges = judging.standby_judges ?? Math.max(0, confirmedJudges - assignedJudges);
+    const totalTeams = judging.total_teams ?? computed.teams_count ?? 50;
+    const maxTeamsPerJudge = judging.max_teams_per_judge ?? facts.judging_rules?.max_teams_per_judge ?? 3;
+    const minutesPerTeam = judging.minutes_per_team ?? facts.judging_rules?.minutes_per_team ?? 15;
+    const honorarium = judging.honorarium_per_judge ?? facts.judging_rules?.honorarium_per_judge ?? 0;
+    const totalJudgingCost = judging.total_judging_cost ?? computed.judging_cost ?? (assignedJudges * honorarium);
+
+    // Budget ledger line items
+    const lineItems = Array.isArray(budget.line_items) && budget.line_items.length > 0
+        ? budget.line_items
+        : [
+            ...(computed.venue_cost ? [{ category: 'Venue', description: 'Selected venue rental', amount: computed.venue_cost }] : []),
+            ...(computed.catering_cost ? [{ category: 'Food', description: 'Catering & refreshments', amount: computed.catering_cost }] : []),
+            ...(computed.judging_cost ? [{ category: 'Judging', description: 'Judge honorariums', amount: computed.judging_cost }] : []),
+            ...((facts.fixed_expenses || []).map((exp: any) => ({ category: 'Fixed', description: exp.item, amount: exp.cost }))),
+        ];
+    const excludedItems = budget.excluded_items || [];
 
     return (
         <div className="min-h-screen bg-[#f8fafc] text-slate-900 font-sans antialiased flex flex-col selection:bg-blue-100 selection:text-blue-900">
@@ -463,12 +492,33 @@ export default function Dashboard({
                                     )}
                                 </div>
 
-                                <div className="flex items-center gap-2 text-[11px] text-amber-800 bg-amber-50 p-2.5 rounded border border-amber-200">
-                                    <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                                    <span>
-                                        <strong>Prayer Break Guaranteed:</strong> Uninterrupted dedicated prayer buffer honored with zero overlap. Late arrival buffer preserved for judging.
-                                    </span>
-                                </div>
+                                 {/* Dynamic Operational Constraints & Honored Buffers */}
+                                {((schedule.constraints_honored && schedule.constraints_honored.length > 0) || (facts.schedule_constraints && facts.schedule_constraints.length > 0)) && (
+                                    <div className="bg-slate-50 p-2.5 rounded border border-slate-200 flex flex-col gap-1.5 text-xs">
+                                        <div className="flex items-center gap-1.5 font-semibold text-slate-700 text-[11px] uppercase tracking-wider">
+                                            <Clock className="w-3.5 h-3.5 text-blue-600" />
+                                            <span>Operational Constraints &amp; Buffers Honored:</span>
+                                        </div>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {schedule.constraints_honored && Array.isArray(schedule.constraints_honored)
+                                                ? schedule.constraints_honored.map((c: string, i: number) => (
+                                                    <span key={i} className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-medium">
+                                                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                                        {c}
+                                                    </span>
+                                                ))
+                                                : null}
+                                            {facts.schedule_constraints && Array.isArray(facts.schedule_constraints)
+                                                ? facts.schedule_constraints.map((sc: any, i: number) => (
+                                                    <span key={`sc-${i}`} className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200 text-[11px] font-medium">
+                                                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                                                        {sc.description || sc.type} {sc.duration_minutes ? `(${sc.duration_minutes}m)` : ''} {sc.delay_minutes ? `(+${sc.delay_minutes}m buffer)` : ''}
+                                                    </span>
+                                                ))
+                                                : null}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Area 3: Food & Catering Architecture */}
@@ -489,10 +539,10 @@ export default function Dashboard({
                                     <div className="bg-slate-50 p-3 rounded border border-slate-100">
                                         <span className="text-slate-500 text-[11px] block uppercase font-semibold">Selected Caterer</span>
                                         <span className="font-bold text-slate-900 text-sm block mt-0.5">
-                                            {food.selected_caterer || 'Catering Selection'}
+                                            {catererName}
                                         </span>
                                         <span className="font-mono text-slate-600 text-[11px] block mt-1">
-                                            Rs {food.cost_per_head ? food.cost_per_head.toLocaleString() : '—'} / Head
+                                            Rs {foodUnitCost > 0 ? foodUnitCost.toLocaleString() : '—'} / Head {deliveryCost > 0 ? `(+Rs ${deliveryCost.toLocaleString()} Del)` : '(Free Delivery)'}
                                         </span>
                                     </div>
 
@@ -500,33 +550,44 @@ export default function Dashboard({
                                         <span className="text-slate-500 text-[11px] block uppercase font-semibold">Total Meal Boxes</span>
                                         <div className="flex items-baseline gap-1 mt-0.5">
                                             <span className="font-mono text-base font-bold text-slate-900">
-                                                {food.total_boxes || headcount}
+                                                {totalMealBoxes}
                                             </span>
                                             <span className="text-slate-500">Boxes</span>
                                         </div>
                                         <span className="text-emerald-700 font-medium text-[11px] block mt-1">
-                                            Matches 100% of {headcount} attendees
+                                            {food.headcount_breakdown ? (
+                                                `${food.headcount_breakdown.students} students + ${food.headcount_breakdown.staff} staff + ${food.headcount_breakdown.judges} judges`
+                                            ) : (
+                                                `Matches 100% of ${headcount} attendees`
+                                            )}
                                         </span>
                                     </div>
 
                                     <div className="bg-slate-50 p-3 rounded border border-slate-100">
                                         <span className="text-slate-500 text-[11px] block uppercase font-semibold">Total Food Spend</span>
                                         <span className="font-mono text-base font-bold text-emerald-700 block mt-0.5">
-                                            Rs {food.total_cost ? food.total_cost.toLocaleString() : '—'}
+                                            Rs {totalFoodCost > 0 ? totalFoodCost.toLocaleString() : '—'}
                                         </span>
                                         <span className="text-slate-500 text-[11px] block mt-1">Within budget ceiling</span>
                                     </div>
                                 </div>
 
-                                {food.dietary_breakdown && (
+                                {food.notes && (
+                                    <div className="bg-blue-50/50 p-2.5 rounded border border-blue-100 text-xs text-slate-700 mb-2">
+                                        <strong className="text-blue-900 font-semibold">Catering Notes:</strong> {food.notes}
+                                    </div>
+                                )}
+
+                                {/* Dynamic Dietary Constraints if specified */}
+                                {facts.custom_constraints && facts.custom_constraints.filter((c: any) => c.area === 'food').length > 0 && (
                                     <div className="bg-slate-50 p-2.5 rounded border border-slate-100 text-xs text-slate-700">
                                         <span className="text-slate-500 text-[11px] uppercase font-semibold block mb-1">
-                                            Dietary Breakdown:
+                                            Dietary Requirements:
                                         </span>
-                                        <div className="flex flex-wrap gap-2">
-                                            {Object.entries(food.dietary_breakdown).map(([k, v]) => (
-                                                <span key={k} className="px-2 py-0.5 rounded bg-white border border-slate-200 font-mono text-[11px]">
-                                                    {k}: <strong>{String(v)}</strong>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {facts.custom_constraints.filter((c: any) => c.area === 'food').map((c: any, i: number) => (
+                                                <span key={i} className="px-2 py-0.5 rounded bg-white border border-slate-200 font-mono text-[11px] text-slate-800">
+                                                    {c.target}: <strong>{c.value ? String(c.value) : 'Enforced'}</strong> ({c.description})
                                                 </span>
                                             ))}
                                         </div>
@@ -552,33 +613,37 @@ export default function Dashboard({
                                     <div className="bg-slate-50 p-3 rounded border border-slate-100">
                                         <span className="text-slate-500 text-[11px] block uppercase font-semibold">Judges Staffed</span>
                                         <span className="font-mono text-base font-bold text-slate-900 block mt-0.5">
-                                            {judging.judges_count || '—'} Judges
+                                            {assignedJudges} Active ({confirmedJudges} Confirmed)
                                         </span>
-                                        <span className="text-slate-500 text-[11px] block mt-1">Sufficient for evaluation</span>
+                                        <span className="text-slate-500 text-[11px] block mt-1">
+                                            {standbyJudges > 0 ? `+${standbyJudges} Standby Reserve` : 'Sufficient panel capacity'}
+                                        </span>
                                     </div>
 
                                     <div className="bg-slate-50 p-3 rounded border border-slate-100">
-                                        <span className="text-slate-500 text-[11px] block uppercase font-semibold">Load Ratio</span>
+                                        <span className="text-slate-500 text-[11px] block uppercase font-semibold">Evaluation Workload</span>
                                         <span className="font-mono text-base font-bold text-blue-700 block mt-0.5">
-                                            {judging.teams_per_judge ? `${judging.teams_per_judge} Teams / Judge` : 'Compliant'}
+                                            {assignedJudges > 0 ? `${(totalTeams / assignedJudges).toFixed(1)} Teams / Judge` : `${maxTeamsPerJudge} Max Teams`}
                                         </span>
                                         <span className="text-emerald-700 font-medium text-[11px] block mt-1">
-                                            Limit: &le; {judging.max_teams_per_judge_limit || 5} teams
+                                            Limit: &le; {maxTeamsPerJudge} teams ({minutesPerTeam}m / team)
                                         </span>
                                     </div>
 
                                     <div className="bg-slate-50 p-3 rounded border border-slate-100">
-                                        <span className="text-slate-500 text-[11px] block uppercase font-semibold">Late Arrival Buffer</span>
+                                        <span className="text-slate-500 text-[11px] block uppercase font-semibold">Total Judging Spend</span>
                                         <span className="font-mono text-base font-bold text-slate-900 block mt-0.5">
-                                            +{judging.late_arrival_buffer_minutes || 10} Mins
+                                            Rs {totalJudgingCost.toLocaleString()}
                                         </span>
-                                        <span className="text-slate-500 text-[11px] block mt-1">Slot rescheduled safely</span>
+                                        <span className="text-slate-500 text-[11px] block mt-1">
+                                            Rs {honorarium.toLocaleString()} honorarium per judge
+                                        </span>
                                     </div>
                                 </div>
 
-                                {judging.notes && (
+                                {(judging.contingency_notes || judging.notes) && (
                                     <p className="text-[11px] text-slate-600 bg-slate-50 p-2.5 rounded border border-slate-200 leading-relaxed">
-                                        <strong className="text-slate-900 font-semibold">Governance Protocol:</strong> {judging.notes}
+                                        <strong className="text-slate-900 font-semibold">Contingency &amp; Governance Notes:</strong> {judging.contingency_notes || judging.notes}
                                     </p>
                                 )}
                             </div>
@@ -592,8 +657,12 @@ export default function Dashboard({
                                         </span>
                                         <h3 className="font-bold text-slate-900 text-sm">Financial &amp; Budget Allocation Ledger</h3>
                                     </div>
-                                    <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                        UNDER CAP (+Rs {surplus.toLocaleString()} SURPLUS)
+                                    <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded border ${
+                                        surplus >= 0
+                                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                            : 'bg-rose-50 text-rose-700 border-rose-200'
+                                    }`}>
+                                        {surplus >= 0 ? `UNDER CAP (+Rs ${surplus.toLocaleString()} SURPLUS)` : `OVER BUDGET (Rs ${Math.abs(surplus).toLocaleString()} DEFICIT)`}
                                     </span>
                                 </div>
 
@@ -616,15 +685,15 @@ export default function Dashboard({
 
                                     <div className="bg-slate-50 p-3 rounded border border-slate-100">
                                         <span className="text-slate-500 text-[11px] block uppercase font-semibold">Remaining Surplus Buffer</span>
-                                        <span className="font-mono text-lg font-bold text-emerald-700 block mt-0.5">
-                                            +Rs {surplus.toLocaleString()}
+                                        <span className={`font-mono text-lg font-bold block mt-0.5 ${surplus >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                            {surplus >= 0 ? `+Rs ${surplus.toLocaleString()}` : `-Rs ${Math.abs(surplus).toLocaleString()}`}
                                         </span>
-                                        <span className="text-emerald-700 font-medium text-[11px]">Uncommitted Reserve</span>
+                                        <span className="text-slate-500 text-[11px]">Uncommitted Reserve</span>
                                     </div>
                                 </div>
 
                                 {/* Visual Progress Bar */}
-                                <div className="space-y-1 mb-2">
+                                <div className="space-y-1 mb-3">
                                     <div className="flex justify-between text-[11px] text-slate-500 font-mono">
                                         <span>Allocated: Rs {totalSpend.toLocaleString()}</span>
                                         <span>Reserve: Rs {surplus.toLocaleString()}</span>
@@ -637,11 +706,77 @@ export default function Dashboard({
                                         />
                                         <div
                                             className="bg-emerald-500 h-full transition-all duration-500"
-                                            style={{ width: `${100 - spendPercentage}%` }}
-                                            title={`Surplus: ${100 - spendPercentage}%`}
+                                            style={{ width: `${Math.max(0, 100 - spendPercentage)}%` }}
+                                            title={`Surplus: ${Math.max(0, 100 - spendPercentage)}%`}
                                         />
                                     </div>
                                 </div>
+
+                                {/* Financial Ledger Table */}
+                                {lineItems.length > 0 && (
+                                    <div className="mt-3 border border-slate-200 rounded-lg overflow-hidden bg-white">
+                                        <div className="bg-slate-50 px-3 py-2 border-b border-slate-200 flex items-center justify-between">
+                                            <span className="font-semibold text-slate-800 text-xs flex items-center gap-1.5">
+                                                <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
+                                                Line-Item Allocation Breakdown
+                                            </span>
+                                            <span className="text-[11px] font-mono text-slate-500">
+                                                {lineItems.length} Allocated Items
+                                            </span>
+                                        </div>
+                                        <div className="divide-y divide-slate-100 text-xs">
+                                            {lineItems.map((item: any, idx: number) => {
+                                                const itemAmount = Number(item.amount || item.cost || 0);
+                                                const itemPercent = totalSpend > 0 ? Math.round((itemAmount / totalSpend) * 100) : 0;
+                                                return (
+                                                    <div key={idx} className="px-3 py-2 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200">
+                                                                {item.category || 'General'}
+                                                            </span>
+                                                            <span className="font-medium text-slate-900">
+                                                                {item.description || item.item || item.category}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex items-center gap-3">
+                                                            <span className="text-[11px] text-slate-500 font-mono">
+                                                                {itemPercent}%
+                                                            </span>
+                                                            <span className="font-mono font-semibold text-slate-900 text-xs min-w-[80px] text-right">
+                                                                Rs {itemAmount.toLocaleString()}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                        <div className="bg-slate-50 px-3 py-2 border-t border-slate-200 flex items-center justify-between font-semibold text-xs text-slate-900">
+                                            <span>Total Operational Spend</span>
+                                            <span className="font-mono text-blue-700 text-sm">
+                                                Rs {totalSpend.toLocaleString()}
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Excluded / Rejected Items Notice */}
+                                {excludedItems.length > 0 && (
+                                    <div className="mt-3 bg-rose-50/70 border border-rose-200 p-2.5 rounded text-xs">
+                                        <span className="font-semibold text-rose-900 block mb-1">
+                                            Excluded / Non-Approved Budget Requests:
+                                        </span>
+                                        <div className="space-y-1">
+                                            {excludedItems.map((ex: any, idx: number) => (
+                                                <div key={idx} className="text-[11px] text-rose-800 flex items-start gap-1.5">
+                                                    <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
+                                                    <span>
+                                                        <strong>Message #{ex.message_index} ({ex.sender}):</strong> {ex.reason}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
 
                                 {budget.breakdown && typeof budget.breakdown === 'object' && (
                                     <div className="flex flex-wrap gap-2 text-xs pt-2 border-t border-slate-100">
