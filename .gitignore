@@ -13,6 +13,7 @@
 !/storage/app/samples/sample_pack.txt
 !/storage/app/samples/update_valid.txt
 !/storage/app/samples/update_invalid.txt
+!/storage/app/samples/judging_pack.txt
 /storage/app/judge_*
 /storage/app/test_*
 /storage/app/downloads/*
