@@ -73,32 +73,33 @@ Each object in the "messages" array must have:
 - "raw_index": string/int or null
 - "sender": string
 - "date_str": string or null
-- "normalized_date_sort": integer YYYYMMDD (assume current year if only day/month given, or sequential number if no date)
-- "raw_content": string (the message text)
+- "normalized_date_sort": integer YYYYMMDD (assume 2026 if only day/month given, or sequential number if no date)
+- "raw_content": string (exact message text)
 - "is_unapproved_wish": boolean (true IF the sender is asking/wishing for an optional non-essential expense without organizer approval, e.g. DJ, concert)
 - "intent": string ("directive" | "vendor_quote" | "constraint_update" | "forced_override" | "unapproved_request" | "irrelevant")
-- "facts": object with nullable fields:
-  - "duration_hours": number or null
-  - "students_count": int or null
-  - "team_size": int or null
-  - "teams_count": int or null
-  - "staff_count": int or null
-  - "extra_participants_count": int or null
-  - "total_budget_limit": number or null
+- "facts": object with ONLY present/extracted keys (OMIT null or empty fields to keep output compact):
+  - "duration_hours": number
+  - "students_count": int
+  - "team_size": int
+  - "teams_count": int
+  - "staff_count": int
+  - "extra_participants_count": int
+  - "total_budget_limit": number
   - "schedule_constraints": array of objects [{ "type": string, "description": string, "duration_minutes": number, "delay_minutes": number }]
   - "venue_options": array of objects [{ "name": string, "capacity": int, "cost": number, "features": array of strings }]
   - "venue_requirements": array of strings
-  - "catering_options": array of objects [{ "name": string, "cost_per_head": number, "delivery_cost": number, "forced_box_count": number or null }]
-  - "judging_rules": object { "confirmed_judges": int or null, "honorarium_per_judge": number or null, "minutes_per_team": number or null, "max_teams_per_judge": number or null } or null
+  - "catering_options": array of objects [{ "name": string, "cost_per_head": number, "delivery_cost": number, "forced_box_count": number }]
+  - "judging_rules": object { "confirmed_judges": int, "honorarium_per_judge": number, "minutes_per_team": number, "max_teams_per_judge": number }
   - "fixed_expenses": array of objects [{ "item": string, "cost": number, "is_approved": boolean }]
-  - "custom_constraints": array of objects [{ "area": string, "rule_description": string, "min_value": number or null, "max_value": number or null, "hard_requirement": boolean }]
+  - "custom_constraints": array of objects [{ "area": string, "rule_description": string, "min_value": number, "max_value": number, "hard_requirement": boolean }]
 
 Critical extraction guidelines:
 1. Extract ALL numbers accurately from the text without hallucinating or modifying them.
-2. For Roman Urdu messages, accurately understand quotes and item options.
-3. If a message specifies forced food boxes (e.g. rounded down to N boxes), set catering_options with forced_box_count=N and intent="forced_override".
-4. If a message updates a single bill/expense, set fixed_expenses accordingly and intent="constraint_update".
-5. Return ONLY a valid JSON object matching this schema. No markdown explanations outside JSON.
+2. Always include a "facts" object for each message (use empty object {} if no facts present).
+3. For Roman Urdu messages, accurately understand quotes and item options.
+4. If a message specifies forced food boxes (e.g. rounded down to N boxes), set catering_options with forced_box_count=N and intent="forced_override".
+5. If a message updates a single bill/expense, set fixed_expenses accordingly and intent="constraint_update".
+6. Return ONLY a valid JSON object matching this schema. No markdown explanations outside JSON.
 PROMPT;
     }
 

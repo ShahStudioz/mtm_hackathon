@@ -45,15 +45,38 @@ class LlmClientService
             'content' => $userPrompt,
         ];
 
-        $response = Http::withToken($apiKey)
-            ->timeout($timeout)
-            ->post("{$baseUrl}/chat/completions", [
-                'model' => $defaultModel,
-                'messages' => $messages,
-                'temperature' => $temperature,
-            ]);
+        $maxTokens = match ($area) {
+            PlanArea::Reading => 4000,
+            PlanArea::Schedule => 1800,
+            default => 1000,
+        };
+        $maxRetries = 4;
+        $attempt = 0;
+        $response = null;
 
-        $response->throw();
+        while ($attempt < $maxRetries) {
+            $attempt++;
+            $response = Http::withToken($apiKey)
+                ->timeout($timeout)
+                ->post("{$baseUrl}/chat/completions", [
+                    'model' => $defaultModel,
+                    'messages' => $messages,
+                    'temperature' => $temperature,
+                    'max_completion_tokens' => $maxTokens,
+                ]);
+
+            if ($response->status() === 429 && $attempt < $maxRetries) {
+                sleep(2);
+
+                continue;
+            }
+
+            break;
+        }
+
+        if ($response === null || $response->failed()) {
+            throw new \RuntimeException('LLM API Call failed with status '.($response ? $response->status() : 'null').': '.($response ? $response->body() : 'no response'));
+        }
 
         $responseData = $response->json();
 
@@ -108,6 +131,15 @@ class LlmClientService
         }
 
         $decoded = json_decode($trimmed, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            $firstBrace = strpos($trimmed, '{');
+            $lastBrace = strrpos($trimmed, '}');
+            if ($firstBrace !== false && $lastBrace !== false && $lastBrace > $firstBrace) {
+                $sub = substr($trimmed, $firstBrace, $lastBrace - $firstBrace + 1);
+                $decoded = json_decode($sub, true);
+            }
+        }
 
         return json_last_error() === JSON_ERROR_NONE ? $decoded : null;
     }
